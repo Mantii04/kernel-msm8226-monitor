@@ -25,7 +25,7 @@ jobs:
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip
+            wget xz-utils zip gcc-arm-linux-gnueabi
 
       - name: Clone LineageOS kernel source
         run: |
@@ -55,8 +55,19 @@ jobs:
 
       - name: Download Linaro ARM toolchain 7.5
         run: |
-          wget -q https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz
-          tar xf gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz
+          # Try multiple Linaro mirrors
+          wget -q https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz -O linaro.tar.xz
+          if [ $? -ne 0 ] || [ ! -s linaro.tar.xz ]; then
+            echo "Linaro download failed, trying mirror..."
+            wget -q https://snapshots.linaro.org/gnu-toolchain/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz -O linaro.tar.xz
+          fi
+          if [ $? -ne 0 ] || [ ! -s linaro.tar.xz ]; then
+            echo "Linaro mirror failed, using Ubuntu gcc-arm-linux-gnueabi"
+            echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
+            arm-linux-gnueabi-gcc --version
+            exit 0
+          fi
+          tar xf linaro.tar.xz
           TOOLCHAIN="$(pwd)/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-"
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           ${TOOLCHAIN}gcc --version
@@ -99,7 +110,7 @@ jobs:
             echo "Module: $WLAN_KO"
             echo ""
             echo "=== modinfo ==="
-            modinfo "$WLAN_KO" 2>/dev/null || ${TOOLCHAIN}objdump -h "$WLAN_KO" | head -20
+            modinfo "$WLAN_KO" 2>/dev/null || echo "modinfo not available on runner"
             echo ""
             echo "=== vermagic ==="
             strings "$WLAN_KO" | grep -i "vermagic\|3\.4\.113" | head -5
@@ -130,7 +141,7 @@ jobs:
           retention-days: 30
 
       - name: Create release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: monitor-mode-${{ github.run_number }}
