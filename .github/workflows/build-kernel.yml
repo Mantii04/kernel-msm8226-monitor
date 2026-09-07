@@ -25,7 +25,12 @@ jobs:
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip
+            wget xz-utils zip gcc-arm-linux-gnueabi
+
+      - name: Verify toolchain
+        run: |
+          arm-linux-gnueabi-gcc --version
+          echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
 
       - name: Clone LineageOS kernel source
         run: |
@@ -53,13 +58,6 @@ jobs:
           echo "=== Checking con_mode gate removed ==="
           grep -c "if (VOS_MONITOR_MODE == hdd_get_conparam())" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c || echo "Gate removed: 0 matches"
 
-      - name: Download AOSP arm-eabi-4.8 toolchain
-        run: |
-          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.9
-          TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
-          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
-          ${TOOLCHAIN}gcc --version
-
       - name: Configure kernel
         run: |
           cd android_kernel_samsung_msm8226
@@ -68,7 +66,10 @@ jobs:
       - name: Build kernel modules
         run: |
           cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) modules 2>&1 | tee build.log | tail -100
+          # Add flags to handle GCC 11 with kernel 3.4.x
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) \
+            EXTRA_CFLAGS="-Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -fno-common" \
+            modules 2>&1 | tee build.log | tail -100
 
       - name: Verify wlan.ko built
         run: |
