@@ -1,0 +1,168 @@
+name: Build Monitor Mode Kernel (GT-I9301I)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  ARCH: arm
+  KBUILD_BUILD_USER: "builder"
+  KBUILD_BUILD_HOST: "github-ci"
+  DEFCONFIG: lineage_s3ve3gxx_defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Checkout patch scripts
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev \
+            build-essential git ccache perl python3 \
+            wget xz-utils zip
+
+      - name: Clone LineageOS kernel source
+        run: |
+          git clone --depth=1 -b lineage-18.1 \
+            https://github.com/LineageOS/android_kernel_samsung_msm8226.git
+          cd android_kernel_samsung_msm8226
+          head -5 Makefile
+          echo "Kernel source ready"
+
+      - name: Apply monitor mode patches
+        run: |
+          cd android_kernel_samsung_msm8226
+          cp ../monitor_mode_patch.py .
+          python3 monitor_mode_patch.py
+
+      - name: Verify patches applied
+        run: |
+          cd android_kernel_samsung_msm8226
+          echo "=== Checking interface_modes ==="
+          grep -n "NL80211_IFTYPE_MONITOR" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c | head -5
+          echo ""
+          echo "=== Checking .set_channel in ops ==="
+          grep -n -B1 -A1 "set_channel" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c | head -10
+          echo ""
+          echo "=== Checking con_mode gate removed ==="
+          grep -c "if (VOS_MONITOR_MODE == hdd_get_conparam())" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c || echo "Gate removed: 0 matches"
+
+      - name: Download Linaro ARM toolchain 7.5
+        run: |
+          wget -q https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz
+          tar xf gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz
+          TOOLCHAIN="$(pwd)/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          ${TOOLCHAIN}gcc --version
+
+      - name: Configure kernel
+        run: |
+          cd android_kernel_samsung_msm8226
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" $DEFCONFIG
+
+      - name: Build kernel and modules
+        run: |
+          cd android_kernel_samsung_msm8226
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log | tail -100
+
+      - name: Verify build output
+        run: |
+          cd android_kernel_samsung_msm8226
+          echo "=== Kernel image ==="
+          ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
+          echo ""
+          echo "=== WLAN module ==="
+          find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
+          echo ""
+          echo "=== All .ko modules ==="
+          find . -name "*.ko" -exec ls -lh {} \; 2>/dev/null | head -20
+          echo ""
+          if [ -f arch/arm/boot/zImage ]; then
+            echo "=== BUILD SUCCESSFUL ==="
+          else
+            echo "=== BUILD FAILED ==="
+            tail -80 build.log
+            exit 1
+          fi
+
+      - name: Check wlan.ko module info
+        run: |
+          cd android_kernel_samsung_msm8226
+          WLAN_KO=$(find . -name "wlan.ko" | head -1)
+          if [ -n "$WLAN_KO" ]; then
+            echo "Module: $WLAN_KO"
+            echo ""
+            echo "=== modinfo ==="
+            modinfo "$WLAN_KO" 2>/dev/null || ${TOOLCHAIN}objdump -h "$WLAN_KO" | head -20
+            echo ""
+            echo "=== vermagic ==="
+            strings "$WLAN_KO" | grep -i "vermagic\|3\.4\.113" | head -5
+          else
+            echo "wlan.ko not found!"
+          fi
+
+      - name: Package artifacts
+        run: |
+          cd android_kernel_samsung_msm8226
+          mkdir -p ../output
+          cp arch/arm/boot/zImage ../output/ 2>/dev/null || true
+          find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
+          cp build.log ../output/ 2>/dev/null || true
+          cd ../output
+          ls -lh
+          zip -r ../kernel-monitor-mode-build.zip .
+          cd ..
+          ls -lh kernel-monitor-mode-build.zip
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-monitor-mode-build
+          path: |
+            output/
+            kernel-monitor-mode-build.zip
+          retention-days: 30
+
+      - name: Create release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: monitor-mode-${{ github.run_number }}
+          name: Monitor Mode Kernel Build #${{ github.run_number }}
+          files: kernel-monitor-mode-build.zip
+          body: |
+            Monitor mode kernel build for GT-I9301I (S3 Neo) on LineageOS 18.1
+            
+            ## Contents
+            - zImage — patched kernel image
+            - wlan.ko — patched wifi driver module with monitor mode always enabled
+            
+            ## Patches Applied
+            1. Removed con_mode gate on interface_modes — monitor always advertised
+            2. Enabled .set_channel unconditionally — channel setting works on 3.4.x
+            3. Added NL80211_IFTYPE_MONITOR mapping to add_virtual_intf
+            4. Added monitor case to change_virtual_intf (if found)
+            
+            ## Usage
+            ```bash
+            # Option A: Standard airmon-ng workflow
+            ip link set wlan0 down
+            iw dev wlan0 set type monitor
+            ip link set wlan0 up
+            iw dev wlan0 set channel 6
+            tcpdump -i wlan0 -n -c 10
+            
+            # Option B: Create separate monitor interface
+            iw phy phy0 interface add mon0 type monitor
+            ip link set mon0 up
+            iw dev mon0 set channel 6
+            tcpdump -i mon0 -n -c 10
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
