@@ -25,7 +25,7 @@ jobs:
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip gcc-arm-linux-gnueabi
+            wget xz-utils zip
 
       - name: Clone LineageOS kernel source
         run: |
@@ -53,22 +53,10 @@ jobs:
           echo "=== Checking con_mode gate removed ==="
           grep -c "if (VOS_MONITOR_MODE == hdd_get_conparam())" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c || echo "Gate removed: 0 matches"
 
-      - name: Download Linaro ARM toolchain 7.5
+      - name: Download AOSP arm-eabi-4.8 toolchain
         run: |
-          # Try multiple Linaro mirrors
-          wget -q https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz -O linaro.tar.xz
-          if [ $? -ne 0 ] || [ ! -s linaro.tar.xz ]; then
-            echo "Linaro download failed, trying mirror..."
-            wget -q https://snapshots.linaro.org/gnu-toolchain/7.5-2019.12/arm-linux-gnueabi/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi.tar.xz -O linaro.tar.xz
-          fi
-          if [ $? -ne 0 ] || [ ! -s linaro.tar.xz ]; then
-            echo "Linaro mirror failed, using Ubuntu gcc-arm-linux-gnueabi"
-            echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
-            arm-linux-gnueabi-gcc --version
-            exit 0
-          fi
-          tar xf linaro.tar.xz
-          TOOLCHAIN="$(pwd)/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-"
+          git clone --depth=1 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.9
+          TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           ${TOOLCHAIN}gcc --version
 
@@ -77,67 +65,55 @@ jobs:
           cd android_kernel_samsung_msm8226
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" $DEFCONFIG
 
-      - name: Build kernel and modules
+      - name: Build kernel modules
         run: |
           cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log | tail -100
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) modules 2>&1 | tee build.log | tail -100
 
-      - name: Verify build output
+      - name: Verify wlan.ko built
         run: |
           cd android_kernel_samsung_msm8226
-          echo "=== Kernel image ==="
-          ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
-          echo ""
           echo "=== WLAN module ==="
           find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
           echo ""
           echo "=== All .ko modules ==="
           find . -name "*.ko" -exec ls -lh {} \; 2>/dev/null | head -20
           echo ""
-          if [ -f arch/arm/boot/zImage ]; then
+          WLAN_KO=$(find . -name "wlan.ko" | head -1)
+          if [ -n "$WLAN_KO" ]; then
             echo "=== BUILD SUCCESSFUL ==="
+            echo "Module: $WLAN_KO"
+            echo ""
+            echo "=== vermagic ==="
+            strings "$WLAN_KO" | grep -i "vermagic" | head -5
+            echo ""
+            echo "=== module info ==="
+            strings "$WLAN_KO" | grep -i "depends\|license\|author" | head -10
           else
             echo "=== BUILD FAILED ==="
             tail -80 build.log
             exit 1
           fi
 
-      - name: Check wlan.ko module info
-        run: |
-          cd android_kernel_samsung_msm8226
-          WLAN_KO=$(find . -name "wlan.ko" | head -1)
-          if [ -n "$WLAN_KO" ]; then
-            echo "Module: $WLAN_KO"
-            echo ""
-            echo "=== modinfo ==="
-            modinfo "$WLAN_KO" 2>/dev/null || echo "modinfo not available on runner"
-            echo ""
-            echo "=== vermagic ==="
-            strings "$WLAN_KO" | grep -i "vermagic\|3\.4\.113" | head -5
-          else
-            echo "wlan.ko not found!"
-          fi
-
       - name: Package artifacts
         run: |
           cd android_kernel_samsung_msm8226
           mkdir -p ../output
-          cp arch/arm/boot/zImage ../output/ 2>/dev/null || true
           find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
           cp build.log ../output/ 2>/dev/null || true
           cd ../output
           ls -lh
-          zip -r ../kernel-monitor-mode-build.zip .
+          zip -r ../wlan-monitor-mode.zip .
           cd ..
-          ls -lh kernel-monitor-mode-build.zip
+          ls -lh wlan-monitor-mode.zip
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-monitor-mode-build
+          name: wlan-monitor-mode
           path: |
             output/
-            kernel-monitor-mode-build.zip
+            wlan-monitor-mode.zip
           retention-days: 30
 
       - name: Create release
@@ -145,13 +121,12 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: monitor-mode-${{ github.run_number }}
-          name: Monitor Mode Kernel Build #${{ github.run_number }}
-          files: kernel-monitor-mode-build.zip
+          name: Monitor Mode wlan.ko Build #${{ github.run_number }}
+          files: wlan-monitor-mode.zip
           body: |
-            Monitor mode kernel build for GT-I9301I (S3 Neo) on LineageOS 18.1
+            Monitor mode wlan.ko for GT-I9301I (S3 Neo) on LineageOS 18.1
             
             ## Contents
-            - zImage — patched kernel image
             - wlan.ko — patched wifi driver module with monitor mode always enabled
             
             ## Patches Applied
@@ -160,20 +135,24 @@ jobs:
             3. Added NL80211_IFTYPE_MONITOR mapping to add_virtual_intf
             4. Added monitor case to change_virtual_intf (if found)
             
+            ## Installation
+            ```bash
+            adb push wlan.ko /sdcard/wlan.ko
+            adb shell su -c "mount -o rw,remount /vendor"
+            adb shell su -c "cp /sdcard/wlan.ko /system/vendor/lib/modules/wlan.ko"
+            adb shell su -c "chmod 644 /system/vendor/lib/modules/wlan.ko"
+            adb shell su -c "mount -o ro,remount /vendor"
+            adb reboot
+            ```
+            
             ## Usage
             ```bash
-            # Option A: Standard airmon-ng workflow
+            # Standard airmon-ng workflow
             ip link set wlan0 down
             iw dev wlan0 set type monitor
             ip link set wlan0 up
             iw dev wlan0 set channel 6
             tcpdump -i wlan0 -n -c 10
-            
-            # Option B: Create separate monitor interface
-            iw phy phy0 interface add mon0 type monitor
-            ip link set mon0 up
-            iw dev mon0 set channel 6
-            tcpdump -i mon0 -n -c 10
             ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
