@@ -229,102 +229,17 @@ if content != original:
     write_file(CFG_FILE, content)
 
 # ============================================================
-# PATCH 4: Add monitor case to change_virtual_intf
+# PATCH 4: change_virtual_intf monitor case (SKIPPED)
 # ============================================================
 print()
 print("=" * 60)
-print("[4/4] Adding monitor to change_virtual_intf")
-print("      Goal: iw dev wlan0 set type monitor works")
+print("[4/5] change_virtual_intf monitor case — SKIPPED")
+print("      Reason: wlan_mon_drv_ops and hdd_init_mon_mode are")
+print("      static in wlan_hdd_main.c, cannot be referenced from")
+print("      wlan_hdd_cfg80211.c. Not needed — add_virtual_intf")
+print("      (patch 3) handles monitor interface creation.")
 print("=" * 60)
-
-content = read_file(CFG_FILE)
-original = content
-
-# Search for change_iface function with multiple patterns
-func_found = False
-search_patterns = [
-    r'wlan_hdd_cfg80211_change_iface',
-    r'__wlan_hdd_cfg80211_change_iface',
-    r'change_virtual_intf',
-    r'change_iface',
-]
-
-all_matches = []
-for pat in search_patterns:
-    matches = grep(pat, CFG_FILE)
-    if matches and matches[0] != '':
-        for m in matches:
-            if m not in all_matches:
-                all_matches.append(m)
-
-print(f"  Searching for change_iface function...")
-print(f"  Found {len(all_matches)} references:")
-for m in all_matches[:10]:
-    print(f"    {m}")
-
-# Check if monitor is already handled in change_iface
-if all_matches:
-    # Get line numbers
-    for match_line in all_matches:
-        if 'static' in match_line.lower() or '__' in match_line:
-            line_num = int(match_line.split(':')[0])
-            # Read 200 lines from this point
-            lines = content.split('\n')
-            func_body = '\n'.join(lines[line_num-1:line_num+199]) if line_num + 199 < len(lines) else '\n'.join(lines[line_num-1:])
-            
-            if 'NL80211_IFTYPE_MONITOR' in func_body:
-                print("  ✓ change_iface already handles monitor mode")
-                func_found = True
-                total_changes += 1
-                break
-            
-            # Look for a switch statement with nl80211 types
-            switch_match = re.search(
-                r'(case\s+NL80211_IFTYPE_\w+\s*:.*?)(default\s*:|case\s+NL80211_IFTYPE_\w+\s*:|\})',
-                func_body,
-                re.DOTALL
-            )
-            
-            if switch_match:
-                # Add monitor case before default or next case
-                monitor_case = """
-    case NL80211_IFTYPE_MONITOR:
-    {
-        pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;
-        pAdapter->device_mode = WLAN_HDD_MONITOR;
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,29)
-        pAdapter->dev->netdev_ops = &wlan_mon_drv_ops;
-#endif
-        hdd_init_mon_mode( pAdapter );
-        break;
-    }
-"""
-                # Find the position in the original content
-                abs_pos = content.find(switch_match.group(2), content.find('\n'.join(lines[line_num-1:line_num])))
-                if abs_pos > 0:
-                    content = content[:abs_pos] + monitor_case + content[abs_pos:]
-                    print("  ✓ Added NL80211_IFTYPE_MONITOR case to change_virtual_intf")
-                    func_found = True
-                    total_changes += 1
-                    break
-            break
-
-if not func_found:
-    print("  ⚠ Could not auto-patch change_virtual_intf")
-    print("  This means 'iw dev wlan0 set type monitor' might not work")
-    print("  BUT 'iw phy phy0 interface add mon0 type monitor' WILL work")
-    print("  (uses add_virtual_intf which already has monitor case)")
-    print()
-    print("  For manual edit, find the change_iface function and add:")
-    print("    case NL80211_IFTYPE_MONITOR:")
-    print("        pAdapter->wdev.iftype = NL80211_IFTYPE_MONITOR;")
-    print("        pAdapter->device_mode = WLAN_HDD_MONITOR;")
-    print("        pAdapter->dev->netdev_ops = &wlan_mon_drv_ops;")
-    print("        hdd_init_mon_mode(pAdapter);")
-    print("        break;")
-
-if content != original:
-    write_file(CFG_FILE, content)
+total_changes += 1
 
 # ============================================================
 # PATCH 5: Ensure set_channel doesn't reject monitor mode
