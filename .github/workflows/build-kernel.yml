@@ -40,6 +40,10 @@ jobs:
           head -5 Makefile
           echo "Kernel source ready"
 
+      - name: Clone AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+
       - name: Patch kernel for GCC 11 compatibility
         run: |
           cd android_kernel_samsung_msm8226
@@ -56,82 +60,193 @@ jobs:
           cp ../monitor_mode_patch.py .
           python3 monitor_mode_patch.py
 
-      - name: Verify patches applied
+      - name: Disable module verification and fix vermagic
         run: |
           cd android_kernel_samsung_msm8226
-          echo "=== Checking interface_modes ==="
-          grep -n "NL80211_IFTYPE_MONITOR" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c | head -5
-          echo ""
-          echo "=== Checking .set_channel in ops ==="
-          grep -n -B1 -A1 "set_channel" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c | head -10
-          echo ""
-          echo "=== Checking con_mode gate removed ==="
-          grep -c "if (VOS_MONITOR_MODE == hdd_get_conparam())" drivers/staging/prima/CORE/HDD/src/wlan_hdd_cfg80211.c || echo "Gate removed: 0 matches"
+          DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
+          
+          # Disable module version checking (CRC)
+          sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' $DEFCONFIG
+          
+          # Disable module signature verification
+          sed -i 's/CONFIG_MODULE_SIG=y/# CONFIG_MODULE_SIG is not set/' $DEFCONFIG 2>/dev/null
+          sed -i 's/CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' $DEFCONFIG 2>/dev/null
+          
+          # Remove existing LOCALVERSION settings
+          sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
+          sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
+          
+          # Set exact vermagic to match stock kernel
+          echo "CONFIG_LOCALVERSION=\"-g3fa1853ed5d\"" >> $DEFCONFIG
+          echo "# CONFIG_LOCALVERSION_AUTO is not set" >> $DEFCONFIG
+          
+          # Prevent -dirty suffix
+          echo "-g3fa1853ed5d" > .scmversion
+          
+          # Commit patches so git state is clean
+          git add -A
+          git config user.email "builder@ci.local"
+          git config user.name "CI Builder"
+          git commit -m "monitor mode patches" --allow-empty
+          
+          echo "Module verification disabled, vermagic fixed"
+          echo "=== Module config ==="
+          grep -i "MODVERSIONS\|MODULE_SIG\|LOCALVERSION" $DEFCONFIG
 
       - name: Configure kernel
         run: |
           cd android_kernel_samsung_msm8226
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" $DEFCONFIG
 
-      - name: Build kernel modules
+      - name: Build kernel image and modules
         run: |
           cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) modules 2>&1 | tee build.log | tail -100
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log | tail -100
 
-      - name: Verify wlan.ko built
+      - name: Build dt.img
         run: |
           cd android_kernel_samsung_msm8226
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) dtbs 2>&1 | tee -a build.log | tail -30
+          
+          # Find the s3ve3g DTB
+          DTB=$(find arch/arm/boot -name "*s3ve3g*.dtb" | head -1)
+          if [ -n "$DTB" ]; then
+            cp "$DTB" arch/arm/boot/dt.img
+            echo "Created dt.img from $DTB"
+          else
+            echo "Searching for alternative DTBs..."
+            find arch/arm/boot -name "*.dtb" | head -20
+            DTB=$(find arch/arm/boot -name "msm8226*sec*s3ve3g*.dtb" | head -1)
+            if [ -n "$DTB" ]; then
+              cp "$DTB" arch/arm/boot/dt.img
+              echo "Created dt.img from $DTB"
+            else
+              echo "WARNING: No s3ve3g DTB found"
+            fi
+          fi
+          
+          ls -lh arch/arm/boot/dt.img 2>/dev/null || echo "dt.img NOT created"
+
+      - name: Verify build output
+        run: |
+          cd android_kernel_samsung_msm8226
+          echo "=== Kernel image ==="
+          ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
+          echo ""
+          echo "=== DT image ==="
+          ls -lh arch/arm/boot/dt.img 2>/dev/null || echo "dt.img NOT found"
+          echo ""
           echo "=== WLAN module ==="
           find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
           echo ""
-          echo "=== All .ko modules ==="
-          find . -name "*.ko" -exec ls -lh {} \; 2>/dev/null | head -20
-          echo ""
           WLAN_KO=$(find . -name "wlan.ko" | head -1)
-          if [ -n "$WLAN_KO" ]; then
+          if [ -n "$WLAN_KO" ] && [ -f arch/arm/boot/zImage ]; then
             echo "=== BUILD SUCCESSFUL ==="
-            echo "Module: $WLAN_KO"
             echo ""
-            echo "=== vermagic ==="
+            echo "=== wlan.ko vermagic ==="
             strings "$WLAN_KO" | grep -i "vermagic" | head -5
-            echo ""
-            echo "=== module info ==="
-            strings "$WLAN_KO" | grep -i "depends\|license\|author" | head -10
           else
             echo "=== BUILD FAILED ==="
             tail -80 build.log
             exit 1
           fi
 
-      - name: Package artifacts
+      - name: Configure AnyKernel3 for GT-I9301I
         run: |
-          cd android_kernel_samsung_msm8226
-          mkdir -p ../output
-          find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
-          cp build.log ../output/ 2>/dev/null || true
-          cd ../output
-          ls -lh
-          zip -r ../wlan-monitor-mode.zip .
+          cd AnyKernel3
+          
+          # Configure AnyKernel3 for Samsung S3 Neo
+          cat > tools/ak2-core/anykernel.sh << 'AK_EOF'
+          # AnyKernel3 configuration for GT-I9301I
+          kernel.string=Monitor Mode Kernel for GT-I9301I
+          do.device=1
+          do.modules=1
+          do.systemless=0
+          do.cleanup=1
+          block=auto
+          AK_EOF
+          
+          # Set the block device for Samsung S3 Neo
+          cat > tools/ak2-core/block << 'BLK_EOF'
+          /dev/block/mmcblk0p15
+          BLK_EOF
+          
+          # Copy kernel and modules
+          cp ../android_kernel_samsung_msm8226/arch/arm/boot/zImage kernel/zImage
+          
+          # Copy dt.img if it exists
+          if [ -f ../android_kernel_samsung_msm8226/arch/arm/boot/dt.img ]; then
+            cp ../android_kernel_samsung_msm8226/arch/arm/boot/dt.img kernel/dt.img
+          fi
+          
+          # Copy wlan.ko to modules directory
+          mkdir -p modules/system/vendor/lib/modules
+          WLAN_KO=$(find ../android_kernel_samsung_msm8226 -name "wlan.ko" | head -1)
+          if [ -n "$WLAN_KO" ]; then
+            cp "$WLAN_KO" modules/system/vendor/lib/modules/wlan.ko
+            echo "Copied wlan.ko to AnyKernel3"
+          fi
+          
+          # Update the anykernel.sh script to flash wlan.ko too
+          cat > anykernel.sh << 'AK_MAIN_EOF'
+          #!/sbin/sh
+          
+          # AnyKernel3 Ramdisk Mod Script
+          # osm0sis @ xda-developers
+          
+          kernel.string=Monitor Mode Kernel for GT-I9301I
+          do.device=1
+          do.modules=1
+          do.systemless=0
+          do.cleanup=1
+          block=auto
+          
+          . /tmp/anykernel/tools/ak2-core/anykernel.sh
+          
+          # Split the boot image
+          split_boot
+          
+          # Flash the kernel
+          write_boot
+          
+          # Install wlan.ko module
+          ui_print "- Installing patched wlan.ko"
+          mkdir -p /system/vendor/lib/modules
+          cp /tmp/anykernel/modules/system/vendor/lib/modules/wlan.ko /system/vendor/lib/modules/wlan.ko
+          chmod 644 /system/vendor/lib/modules/wlan.ko
+          
+          ui_print "- Installation complete!"
+          AK_MAIN_EOF
+          
+          chmod +x anykernel.sh
+          
+          echo "AnyKernel3 configured for GT-I9301I"
+
+      - name: Build AnyKernel3 flashable zip
+        run: |
+          cd AnyKernel3
+          
+          # Make sure everything is in place
+          echo "=== Contents ==="
+          ls -la kernel/
+          ls -la modules/system/vendor/lib/modules/ 2>/dev/null || echo "No modules"
+          echo ""
+          
+          # Create the flashable zip
+          zip -r9 ../monitor-mode-s3ve3gxx.zip * -x "*.git*" -x "tools/ak2-core/block"
+          
           cd ..
-          ls -lh wlan-monitor-mode.zip
+          ls -lh monitor-mode-s3ve3gxx.zip
+          
+          echo "=== Flashable zip created ==="
+          echo "Flash via TWRP: monitor-mode-s3ve3gxx.zip"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wlan-monitor-mode
+          name: monitor-mode-kernel-build
           path: |
-            output/
-            wlan-monitor-mode.zip
+            monitor-mode-s3ve3gxx.zip
+            android_kernel_samsung_msm8226/arch/arm/boot/zImage
+            android_kernel_samsung_msm8226/arch/arm/boot/dt.img
           retention-days: 30
-
-      - name: Create release
-        if: github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: monitor-mode-${{ github.run_number }}
-          name: Monitor Mode wlan.ko Build #${{ github.run_number }}
-          files: wlan-monitor-mode.zip
-          body: |
-            Monitor mode wlan.ko for GT-I9301I (S3 Neo) on LineageOS 18.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
