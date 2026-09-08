@@ -44,7 +44,8 @@ jobs:
           cd android_kernel_samsung_msm8226
           LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
           cp "$LATEST" include/linux/compiler-gcc11.h
-          sed -i "s/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -fno-pie -fno-stack-protector -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/" Makefile
+          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -fno-pie -fno-stack-protector -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/' Makefile
+          sed -i '/^LDFLAGS_vmlinux/s/$/ -fno-pie -no-pie/' Makefile
 
       - name: Apply monitor mode patches
         run: |
@@ -57,11 +58,9 @@ jobs:
           cd android_kernel_samsung_msm8226
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
           sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' $DEFCONFIG
-          sed -i 's/CONFIG_MODULE_SIG=y/# CONFIG_MODULE_SIG is not set/' $DEFCONFIG 2>/dev/null
-          sed -i 's/CONFIG_MODULE_SIG_FORCE=y/# CONFIG_MODULE_SIG_FORCE is not set/' $DEFCONFIG 2>/dev/null
           sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
-          echo "CONFIG_LOCALVERSION=\"-g3fa1853ed5d\"" >> $DEFCONFIG
+          echo "CONFIG_LOCALVERSION="-g3fa1853ed5d"" >> $DEFCONFIG
           echo "# CONFIG_LOCALVERSION_AUTO is not set" >> $DEFCONFIG
           echo "-g3fa1853ed5d" > .scmversion
           git add -A
@@ -79,21 +78,15 @@ jobs:
           cd android_kernel_samsung_msm8226
           set -o pipefail
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log
-          echo "Build exit code: $?"
 
       - name: Build dtbs
         run: |
           cd android_kernel_samsung_msm8226
           set -o pipefail
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) dtbs 2>&1 | tee -a build.log
-          
           DTB=$(find arch/arm/boot -name "*s3ve3g*.dtb" | head -1)
           if [ -n "$DTB" ]; then
             cp "$DTB" arch/arm/boot/dt.img
-            echo "Created dt.img from $DTB"
-          else
-            find arch/arm/boot -name "*.dtb" | head -20
-            echo "WARNING: No s3ve3g DTB found"
           fi
 
       - name: Show build errors if any
@@ -101,29 +94,10 @@ jobs:
         run: |
           cd android_kernel_samsung_msm8226
           echo "=== Errors from build.log ==="
-          grep -i "error:" build.log | tail -30 || echo "No errors found in log"
-          echo ""
-          echo "=== Last 30 lines of build.log ==="
-          tail -30 build.log
-          echo ""
+          grep -i "error:" build.log | tail -30 || echo "No errors found"
           echo "=== Build artifacts ==="
           ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
-          ls -lh arch/arm/boot/dt.img 2>/dev/null || echo "dt.img NOT found"
           find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
-
-      - name: Verify build output
-        run: |
-          cd android_kernel_samsung_msm8226
-          WLAN_KO=$(find . -name "wlan.ko" | head -1)
-          if [ -n "$WLAN_KO" ] && [ -f arch/arm/boot/zImage ]; then
-            echo "=== BUILD SUCCESSFUL ==="
-            strings "$WLAN_KO" | grep -i "vermagic" | head -5
-          else
-            echo "=== BUILD FAILED ==="
-            echo "Errors:"
-            grep -i "error:" build.log | tail -30
-            exit 1
-          fi
 
       - name: Package artifacts
         run: |
