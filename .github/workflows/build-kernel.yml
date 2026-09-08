@@ -44,7 +44,7 @@ jobs:
           cd android_kernel_samsung_msm8226
           LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
           cp "$LATEST" include/linux/compiler-gcc11.h
-          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/' Makefile
+          sed -i "s/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -fno-pie -fno-stack-protector -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/" Makefile
 
       - name: Apply monitor mode patches
         run: |
