@@ -43,16 +43,12 @@ jobs:
       - name: Patch kernel for GCC 11 compatibility
         run: |
           cd android_kernel_samsung_msm8226
-          # Create missing compiler header for GCC 11
           LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
           echo "Latest compiler header found: $LATEST"
           cp "$LATEST" include/linux/compiler-gcc11.h
           echo "Created compiler-gcc11.h from $LATEST"
-          
-          # Add -fcommon and warning suppressions directly to KBUILD_CFLAGS
-          # Do NOT use EXTRA_CFLAGS on command line — it overrides prima Kbuild include paths
           sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/' Makefile
-          echo "Patched KBUILD_CFLAGS with -fcommon and GCC 11 warning suppressions"
+          echo "Patched KBUILD_CFLAGS"
 
       - name: Apply monitor mode patches
         run: |
