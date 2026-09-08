@@ -43,13 +43,16 @@ jobs:
       - name: Patch kernel for GCC 11 compatibility
         run: |
           cd android_kernel_samsung_msm8226
+          # Create missing compiler header for GCC 11
           LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
           echo "Latest compiler header found: $LATEST"
           cp "$LATEST" include/linux/compiler-gcc11.h
           echo "Created compiler-gcc11.h from $LATEST"
           
-          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon/' Makefile
-          echo "Added -fcommon to KBUILD_CFLAGS"
+          # Add -fcommon and warning suppressions directly to KBUILD_CFLAGS
+          # Do NOT use EXTRA_CFLAGS on command line — it overrides prima Kbuild include paths
+          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/' Makefile
+          echo "Patched KBUILD_CFLAGS with -fcommon and GCC 11 warning suppressions"
 
       - name: Apply monitor mode patches
         run: |
@@ -77,9 +80,7 @@ jobs:
       - name: Build kernel modules
         run: |
           cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) \
-            EXTRA_CFLAGS="-Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned" \
-            modules 2>&1 | tee build.log | tail -100
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) modules 2>&1 | tee build.log | tail -100
 
       - name: Verify wlan.ko built
         run: |
@@ -136,33 +137,5 @@ jobs:
           files: wlan-monitor-mode.zip
           body: |
             Monitor mode wlan.ko for GT-I9301I (S3 Neo) on LineageOS 18.1
-            
-            ## Contents
-            - wlan.ko — patched wifi driver module with monitor mode always enabled
-            
-            ## Patches Applied
-            1. Removed con_mode gate on interface_modes — monitor always advertised
-            2. Enabled .set_channel unconditionally — channel setting works on 3.4.x
-            3. Added NL80211_IFTYPE_MONITOR mapping to add_virtual_intf
-            4. Added monitor case to change_virtual_intf (if found)
-            
-            ## Installation
-            ```bash
-            adb push wlan.ko /sdcard/wlan.ko
-            adb shell su -c "mount -o rw,remount /vendor"
-            adb shell su -c "cp /sdcard/wlan.ko /system/vendor/lib/modules/wlan.ko"
-            adb shell su -c "chmod 644 /system/vendor/lib/modules/wlan.ko"
-            adb shell su -c "mount -o ro,remount /vendor"
-            adb reboot
-            ```
-            
-            ## Usage
-            ```bash
-            ip link set wlan0 down
-            iw dev wlan0 set type monitor
-            ip link set wlan0 up
-            iw dev wlan0 set channel 6
-            tcpdump -i wlan0 -n -c 10
-            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
