@@ -67,6 +67,14 @@ jobs:
           git config user.name "CI Builder"
           git commit -m "patches" --allow-empty
 
+      - name: Fix sound include paths
+        shell: bash
+        run: |
+          cd android_kernel_samsung_msm8226
+          echo 'ccflags-y += -I$(src)' >> sound/soc/msm/Makefile
+          echo 'ccflags-y += -I$(src)/qdsp6v2' >> sound/soc/msm/Makefile
+          echo 'Fixed sound include paths'
+
       - name: Configure kernel
         shell: bash
         run: |
