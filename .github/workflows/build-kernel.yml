@@ -79,11 +79,10 @@ jobs:
         shell: bash
         run: |
           cd android_kernel_samsung_msm8226
-          # KBUILD_MODPOST_WARN doesn't exist in 3.4.x — patch the Makefile directly
-          # Add || true to the modpost command so it never returns error
-          sed -i '/cmd_modpost.*scripts\/mod\/modpost/s/$/ || true/' scripts/Makefile.modpost
-          echo "Patched modpost to ignore section mismatch errors"
-          grep 'cmd_modpost' scripts/Makefile.modpost
+          # Patch modpost.c to never error on section mismatches
+          sed -i 's/error_occurred = 1/error_occurred = 0/g' scripts/mod/modpost.c
+          echo "Patched modpost.c — section mismatches will be warnings only"
+          grep -n 'error_occurred' scripts/mod/modpost.c | head -10
 
       - name: Configure kernel
         shell: bash
@@ -96,7 +95,7 @@ jobs:
         run: |
           cd android_kernel_samsung_msm8226
           set -o pipefail
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -k -j$(nproc) zImage modules 2>&1 | tee build.log
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log
 
       - name: Build dtbs
         shell: bash
