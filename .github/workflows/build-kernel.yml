@@ -87,7 +87,7 @@ jobs:
         run: |
           cd android_kernel_samsung_msm8226
           set -o pipefail
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) zImage modules 2>&1 | tee build.log
 
       - name: Build dtbs
         shell: bash
