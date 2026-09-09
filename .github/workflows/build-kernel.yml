@@ -25,12 +25,14 @@ jobs:
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip
+            wget xz-utils zip tar
 
-      - name: Clone GCC 4.9 toolchain from LineageOS mirror
+      - name: Download AOSP GCC 4.9 toolchain
         run: |
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
-          TOOLCHAIN="$(pwd)/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/bin/arm-eabi-"
+          wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.9/+archive/master.tar.gz -O arm-eabi-4.9.tar.gz
+          mkdir -p arm-eabi-4.9
+          tar xzf arm-eabi-4.9.tar.gz -C arm-eabi-4.9
+          TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           ${TOOLCHAIN}gcc --version
 
