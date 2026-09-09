@@ -20,7 +20,7 @@ jobs:
       - name: Checkout GCC 4.9 toolchain
         uses: actions/checkout@v4
         with:
-          repository: LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
+          repository: crdroidandroid/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
           path: arm-eabi-4.9
 
       - name: Install build dependencies
