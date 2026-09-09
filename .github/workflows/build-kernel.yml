@@ -12,27 +12,25 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    container: ubuntu:20.04
 
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            bc bison flex libssl-dev libelf-dev \
-            build-essential git ccache perl python3 \
-            wget xz-utils zip tar ca-certificates \
-            gcc-9-arm-linux-gnueabi g++-9-arm-linux-gnueabi binutils-arm-linux-gnueabi
-
-      - name: Setup GCC 9 toolchain
-        run: |
-          ln -sf /usr/bin/arm-linux-gnueabi-gcc-9 /usr/bin/arm-linux-gnueabi-gcc
-          ln -sf /usr/bin/arm-linux-gnueabi-g++-9 /usr/bin/arm-linux-gnueabi-g++
-          arm-linux-gnueabi-gcc --version
-          echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
-
       - name: Checkout patch scripts
         uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev \
+            build-essential git ccache perl python3 \
+            wget xz-utils zip tar
+
+      - name: Clone GCC 4.9 toolchain
+        run: |
+          git clone --depth=1 https://github.com/marlontoe/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9.git
+          TOOLCHAIN="$(pwd)/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/bin/arm-eabi-"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          ${TOOLCHAIN}gcc --version
 
       - name: Clone LineageOS kernel source
         run: |
@@ -41,26 +39,6 @@ jobs:
           cd android_kernel_samsung_msm8226
           head -5 Makefile
 
-      - name: Patch kernel for GCC 9 compatibility
-        shell: bash
-        run: |
-          cd android_kernel_samsung_msm8226
-          # Create missing compiler header
-          if [ ! -f include/linux/compiler-gcc9.h ]; then
-            LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
-            cp "$LATEST" include/linux/compiler-gcc9.h
-            echo "Created compiler-gcc9.h from $LATEST"
-          fi
-          
-          # Append flags to end of Makefile — more reliable than sed replacement
-          echo "KBUILD_CFLAGS += -fno-pie -fno-pic -fno-stack-protector -fcommon" >> Makefile
-          echo "LDFLAGS_vmlinux += -no-pie" >> Makefile
-          echo "KBUILD_AFLAGS += -fno-pie -fno-pic" >> Makefile
-          echo "Patched Makefile with -fno-pie -fno-pic flags"
-          
-          # Verify the flags were added
-          tail -5 Makefile
-
       - name: Apply monitor mode patches
         run: |
           cd android_kernel_samsung_msm8226
@@ -68,6 +46,7 @@ jobs:
           python3 monitor_mode_patch.py
 
       - name: Fix vermagic to match stock kernel
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
