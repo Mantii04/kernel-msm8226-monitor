@@ -47,10 +47,8 @@ jobs:
           if [ ! -f include/linux/compiler-gcc9.h ]; then
             LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
             cp "$LATEST" include/linux/compiler-gcc9.h
-            echo "Created compiler-gcc9.h from $LATEST"
           fi
           sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon/' Makefile
-          echo "Patched KBUILD_CFLAGS"
 
       - name: Apply monitor mode patches
         run: |
@@ -73,28 +71,31 @@ jobs:
           git commit -m "patches" --allow-empty
 
       - name: Configure kernel
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" $DEFCONFIG
 
       - name: Build kernel image and modules
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           set -o pipefail
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) zImage modules 2>&1 | tee build.log
 
       - name: Build dtbs
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) dtbs 2>&1 | tee -a build.log
           DTB=$(find arch/arm/boot -name "*s3ve3g*.dtb" | head -1)
           if [ -n "$DTB" ]; then
             cp "$DTB" arch/arm/boot/dt.img
-            echo "Created dt.img from $DTB"
           fi
 
       - name: Show build errors if any
         if: always()
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           echo "=== Errors from build.log ==="
@@ -107,6 +108,7 @@ jobs:
           find . -name "wlan.ko" -exec strings {} \; 2>/dev/null | grep -i vermagic | head -5
 
       - name: Package artifacts
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           mkdir -p ../output
