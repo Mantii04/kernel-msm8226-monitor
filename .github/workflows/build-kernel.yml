@@ -25,12 +25,14 @@ jobs:
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip gcc-arm-linux-gnueabi
+            wget xz-utils zip
 
-      - name: Verify toolchain
+      - name: Clone GCC 4.9 toolchain from LineageOS mirror
         run: |
-          arm-linux-gnueabi-gcc --version
-          echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
+          TOOLCHAIN="$(pwd)/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/bin/arm-eabi-"
+          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          ${TOOLCHAIN}gcc --version
 
       - name: Clone LineageOS kernel source
         run: |
@@ -38,14 +40,6 @@ jobs:
             https://github.com/LineageOS/android_kernel_samsung_msm8226.git
           cd android_kernel_samsung_msm8226
           head -5 Makefile
-
-      - name: Patch kernel for GCC 11 compatibility
-        run: |
-          cd android_kernel_samsung_msm8226
-          LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
-          cp "$LATEST" include/linux/compiler-gcc11.h
-          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon -fno-pie -fno-stack-protector -Wno-error -Wno-implicit-function-declaration -Wno-unused-but-set-variable -Wno-misleading-indentation -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-stringop-truncation -Wno-array-bounds -Wno-packed-not-aligned/' Makefile
-          sed -i '/^LDFLAGS_vmlinux/s/$/ -fno-pie -no-pie/' Makefile
 
       - name: Apply monitor mode patches
         run: |
