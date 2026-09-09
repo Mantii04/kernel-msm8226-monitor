@@ -17,6 +17,12 @@ jobs:
       - name: Checkout patch scripts
         uses: actions/checkout@v4
 
+      - name: Checkout GCC 4.9 toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: marlontoe/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
+          path: arm-eabi-4.9
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -25,11 +31,10 @@ jobs:
             build-essential git ccache perl python3 \
             wget xz-utils zip tar
 
-      - name: Download GCC 4.9 toolchain
+      - name: Verify toolchain
         run: |
-          wget -q https://github.com/marlontoe/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/archive/refs/heads/master.tar.gz -O arm-eabi-4.9.tar.gz
-          tar xzf arm-eabi-4.9.tar.gz
-          mv prebuilts_gcc_linux-x86_arm_arm-eabi-4.9-master arm-eabi-4.9
+          ls arm-eabi-4.9/bin/
+          chmod +x arm-eabi-4.9/bin/arm-eabi-*
           TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           ${TOOLCHAIN}gcc --version
