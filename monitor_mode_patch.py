@@ -271,6 +271,65 @@ else:
     print("  ✗ wlan_hdd_cfg80211_set_channel not found!")
 
 # ============================================================
+# PATCH 6: Fix set_channel for monitor mode
+# ============================================================
+print()
+print("=" * 60)
+print("[6/6] Fixing set_channel for monitor mode")
+print("      Goal: iw dev mon0 set channel 6 works")
+print("=" * 60)
+
+content = read_file(CFG_FILE)
+original = content
+
+# The set_channel function has this check:
+# if ((WLAN_HDD_SOFTAP != pAdapter->device_mode) &&
+#    (WLAN_HDD_P2P_GO != pAdapter->device_mode))
+# This sends monitor mode down the STA path which needs an SME session.
+# Add WLAN_HDD_MONITOR to skip the STA path and use the AP path instead.
+
+pattern = re.compile(
+    r'(WLAN_HDD_SOFTAP\s*!=\s*pAdapter->device_mode)\s*&&\s*'
+    r'(WLAN_HDD_P2P_GO\s*!=\s*pAdapter->device_mode)',
+    re.DOTALL
+)
+
+if pattern.search(content):
+    content = pattern.sub(
+        r'\1 && \2 && (WLAN_HDD_MONITOR != pAdapter->device_mode)',
+        content
+    )
+    print("  ✓ Added WLAN_HDD_MONITOR to set_channel AP path check")
+    total_changes += 1
+else:
+    # Try alternate pattern with line breaks
+    pattern2 = re.compile(
+        r'\(WLAN_HDD_SOFTAP\s*!=\s*pAdapter->device_mode\)\s*
+\s*'
+        r'\(WLAN_HDD_P2P_GO\s*!=\s*pAdapter->device_mode\)',
+    )
+    if pattern2.search(content):
+        content = pattern2.sub(
+            '(WLAN_HDD_SOFTAP != pAdapter->device_mode) &&
+           '
+            '(WLAN_HDD_P2P_GO != pAdapter->device_mode) &&
+           '
+            '(WLAN_HDD_MONITOR != pAdapter->device_mode)',
+            content
+        )
+        print("  ✓ Added WLAN_HDD_MONITOR to set_channel AP path check (multiline)")
+        total_changes += 1
+    else:
+        print("  ⚠ Could not auto-patch set_channel check")
+        print("  Manual edit: in __wlan_hdd_cfg80211_set_channel, find:")
+        print("    if ((WLAN_HDD_SOFTAP != pAdapter->device_mode) &&")
+        print("       (WLAN_HDD_P2P_GO != pAdapter->device_mode))")
+        print("  Add: && (WLAN_HDD_MONITOR != pAdapter->device_mode)")
+
+if content != original:
+    write_file(CFG_FILE, content)
+
+# ============================================================
 # Summary and verification
 # ============================================================
 print()
