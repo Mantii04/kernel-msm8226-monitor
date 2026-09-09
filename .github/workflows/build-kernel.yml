@@ -42,13 +42,24 @@ jobs:
           head -5 Makefile
 
       - name: Patch kernel for GCC 9 compatibility
+        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
+          # Create missing compiler header
           if [ ! -f include/linux/compiler-gcc9.h ]; then
             LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
             cp "$LATEST" include/linux/compiler-gcc9.h
+            echo "Created compiler-gcc9.h from $LATEST"
           fi
-          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon/' Makefile
+          
+          # Append flags to end of Makefile — more reliable than sed replacement
+          echo "KBUILD_CFLAGS += -fno-pie -fno-pic -fno-stack-protector -fcommon" >> Makefile
+          echo "LDFLAGS_vmlinux += -no-pie" >> Makefile
+          echo "KBUILD_AFLAGS += -fno-pie -fno-pic" >> Makefile
+          echo "Patched Makefile with -fno-pie -fno-pic flags"
+          
+          # Verify the flags were added
+          tail -5 Makefile
 
       - name: Apply monitor mode patches
         run: |
