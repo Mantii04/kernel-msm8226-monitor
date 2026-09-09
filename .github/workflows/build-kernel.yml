@@ -61,6 +61,7 @@ jobs:
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
           echo "CONFIG_LOCALVERSION="-g3fa1853ed5d"" >> $DEFCONFIG
           echo "# CONFIG_LOCALVERSION_AUTO is not set" >> $DEFCONFIG
+          echo "CONFIG_NO_ERROR_ON_MISMATCH=y" >> $DEFCONFIG
           echo "-g3fa1853ed5d" > .scmversion
           git add -A
           git config user.email "builder@ci.local"
@@ -74,15 +75,6 @@ jobs:
           echo 'ccflags-y += -I$(src)' >> sound/soc/msm/Makefile
           echo 'ccflags-y += -I$(src)/qdsp6v2' >> sound/soc/msm/Makefile
           echo 'Fixed sound include paths'
-
-      - name: Patch modpost to ignore section mismatches
-        shell: bash
-        run: |
-          cd android_kernel_samsung_msm8226
-          # Patch modpost.c to never error on section mismatches
-          sed -i 's/error_occurred = 1/error_occurred = 0/g' scripts/mod/modpost.c
-          echo "Patched modpost.c — section mismatches will be warnings only"
-          grep -n 'error_occurred' scripts/mod/modpost.c | head -10
 
       - name: Configure kernel
         shell: bash
