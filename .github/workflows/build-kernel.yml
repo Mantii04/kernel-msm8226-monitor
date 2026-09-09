@@ -25,10 +25,12 @@ jobs:
             build-essential git ccache perl python3 \
             wget xz-utils zip tar
 
-      - name: Clone GCC 4.9 toolchain
+      - name: Download GCC 4.9 toolchain
         run: |
-          git clone --depth=1 https://github.com/marlontoe/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9.git
-          TOOLCHAIN="$(pwd)/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/bin/arm-eabi-"
+          wget -q https://github.com/marlontoe/prebuilts_gcc_linux-x86_arm_arm-eabi-4.9/archive/refs/heads/master.tar.gz -O arm-eabi-4.9.tar.gz
+          tar xzf arm-eabi-4.9.tar.gz
+          mv prebuilts_gcc_linux-x86_arm_arm-eabi-4.9-master arm-eabi-4.9
+          TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           ${TOOLCHAIN}gcc --version
 
