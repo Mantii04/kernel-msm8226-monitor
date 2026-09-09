@@ -7,34 +7,32 @@ on:
 
 env:
   ARCH: arm
-  KBUILD_BUILD_USER: "builder"
-  KBUILD_BUILD_HOST: "github-ci"
   DEFCONFIG: lineage_s3ve3gxx_defconfig
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    container: ubuntu:20.04
 
     steps:
-      - name: Checkout patch scripts
-        uses: actions/checkout@v4
-
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
-            wget xz-utils zip tar
+            wget xz-utils zip tar ca-certificates \
+            gcc-9-arm-linux-gnueabi g++-9-arm-linux-gnueabi binutils-arm-linux-gnueabi
 
-      - name: Download AOSP GCC 4.9 toolchain
+      - name: Setup GCC 9 toolchain
         run: |
-          wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.9/+archive/master.tar.gz -O arm-eabi-4.9.tar.gz
-          mkdir -p arm-eabi-4.9
-          tar xzf arm-eabi-4.9.tar.gz -C arm-eabi-4.9
-          TOOLCHAIN="$(pwd)/arm-eabi-4.9/bin/arm-eabi-"
-          echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
-          ${TOOLCHAIN}gcc --version
+          ln -sf /usr/bin/arm-linux-gnueabi-gcc-9 /usr/bin/arm-linux-gnueabi-gcc
+          ln -sf /usr/bin/arm-linux-gnueabi-g++-9 /usr/bin/arm-linux-gnueabi-g++
+          arm-linux-gnueabi-gcc --version
+          echo "TOOLCHAIN=arm-linux-gnueabi-" >> $GITHUB_ENV
+
+      - name: Checkout patch scripts
+        uses: actions/checkout@v4
 
       - name: Clone LineageOS kernel source
         run: |
@@ -43,17 +41,27 @@ jobs:
           cd android_kernel_samsung_msm8226
           head -5 Makefile
 
+      - name: Patch kernel for GCC 9 compatibility
+        run: |
+          cd android_kernel_samsung_msm8226
+          if [ ! -f include/linux/compiler-gcc9.h ]; then
+            LATEST=$(ls include/linux/compiler-gcc*.h 2>/dev/null | sort -V | tail -1)
+            cp "$LATEST" include/linux/compiler-gcc9.h
+            echo "Created compiler-gcc9.h from $LATEST"
+          fi
+          sed -i 's/^KBUILD_CFLAGS   := -Wall/KBUILD_CFLAGS   := -Wall -fcommon/' Makefile
+          echo "Patched KBUILD_CFLAGS"
+
       - name: Apply monitor mode patches
         run: |
           cd android_kernel_samsung_msm8226
           cp ../monitor_mode_patch.py .
           python3 monitor_mode_patch.py
 
-      - name: Disable module verification and fix vermagic
+      - name: Fix vermagic to match stock kernel
         run: |
           cd android_kernel_samsung_msm8226
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
-          sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
           echo "CONFIG_LOCALVERSION="-g3fa1853ed5d"" >> $DEFCONFIG
@@ -78,11 +86,11 @@ jobs:
       - name: Build dtbs
         run: |
           cd android_kernel_samsung_msm8226
-          set -o pipefail
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) dtbs 2>&1 | tee -a build.log
           DTB=$(find arch/arm/boot -name "*s3ve3g*.dtb" | head -1)
           if [ -n "$DTB" ]; then
             cp "$DTB" arch/arm/boot/dt.img
+            echo "Created dt.img from $DTB"
           fi
 
       - name: Show build errors if any
@@ -93,7 +101,10 @@ jobs:
           grep -i "error:" build.log | tail -30 || echo "No errors found"
           echo "=== Build artifacts ==="
           ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
+          ls -lh arch/arm/boot/dt.img 2>/dev/null || echo "dt.img NOT found"
           find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
+          echo "=== wlan.ko vermagic ==="
+          find . -name "wlan.ko" -exec strings {} \; 2>/dev/null | grep -i vermagic | head -5
 
       - name: Package artifacts
         run: |
@@ -104,6 +115,7 @@ jobs:
           find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
           cp build.log ../output/ 2>/dev/null || true
           cd ../output
+          ls -lh
           zip -r ../monitor-mode-kernel-build.zip .
           cd ..
           ls -lh monitor-mode-kernel-build.zip
