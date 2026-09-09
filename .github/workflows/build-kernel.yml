@@ -87,17 +87,7 @@ jobs:
         run: |
           cd android_kernel_samsung_msm8226
           set -o pipefail
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) zImage modules 2>&1 | tee build.log
-
-      - name: Build dtbs
-        shell: bash
-        run: |
-          cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" -j$(nproc) dtbs 2>&1 | tee -a build.log
-          DTB=$(find arch/arm/boot -name "*s3ve3g*.dtb" | head -1)
-          if [ -n "$DTB" ]; then
-            cp "$DTB" arch/arm/boot/dt.img
-          fi
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" LOCALVERSION="-g3fa1853ed5d" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) vmlinux modules 2>&1 | tee build.log
 
       - name: Show build errors if any
         if: always()
@@ -118,8 +108,6 @@ jobs:
         run: |
           cd android_kernel_samsung_msm8226
           mkdir -p ../output
-          cp arch/arm/boot/zImage ../output/ 2>/dev/null || true
-          cp arch/arm/boot/dt.img ../output/ 2>/dev/null || true
           find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
           cp build.log ../output/ 2>/dev/null || true
           cd ../output
