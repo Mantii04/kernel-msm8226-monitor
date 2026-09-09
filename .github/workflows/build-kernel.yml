@@ -25,7 +25,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update || true
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             build-essential git ccache perl python3 \
