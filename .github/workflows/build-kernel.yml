@@ -64,17 +64,15 @@ jobs:
           echo 'ccflags-y += -I$(src)' >> sound/soc/msm/Makefile
           echo 'ccflags-y += -I$(src)/qdsp6v2' >> sound/soc/msm/Makefile
 
-      - name: Fix vermagic and disable CRC checks
+      - name: Fix vermagic to match stock kernel exactly
         shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
           sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
-          sed -i 's/CONFIG_MODVERSIONS=y/# CONFIG_MODVERSIONS is not set/' $DEFCONFIG
           echo 'CONFIG_LOCALVERSION="-g3fa1853ed5d"' >> $DEFCONFIG
           echo '# CONFIG_LOCALVERSION_AUTO is not set' >> $DEFCONFIG
-          echo '# CONFIG_MODVERSIONS is not set' >> $DEFCONFIG
           rm -f .scmversion
           rm -rf .git
 
