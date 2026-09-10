@@ -17,19 +17,24 @@ jobs:
       - name: Checkout patch scripts
         uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev \
+            build-essential git ccache perl python3 \
+            wget xz-utils zip tar gcc-arm-linux-gnueabi g++-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Cross-compile monitor_enable for ARM
+        run: |
+          arm-linux-gnueabi-gcc -static -o monitor_enable monitor_enable.c
+          file monitor_enable
+
       - name: Checkout GCC 4.9 toolchain
         uses: actions/checkout@v4
         with:
           repository: crdroidandroid/android_prebuilts_gcc_linux-x86_arm_arm-eabi-4.9
           path: arm-eabi-4.9
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update || true
-          sudo apt-get install -y \
-            bc bison flex libssl-dev libelf-dev \
-            build-essential git ccache perl python3 \
-            wget xz-utils zip tar gcc-arm-linux-gnueabi g++-arm-linux-gnueabi binutils-arm-linux-gnueabi
 
       - name: Verify toolchain
         run: |
@@ -59,22 +64,13 @@ jobs:
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
           sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
-          echo "CONFIG_LOCALVERSION="-g3fa1853ed5d"" >> $DEFCONFIG
+          echo "CONFIG_LOCALVERSION=\"-g3fa1853ed5d\"" >> $DEFCONFIG
           echo "# CONFIG_LOCALVERSION_AUTO is not set" >> $DEFCONFIG
-          echo "CONFIG_NO_ERROR_ON_MISMATCH=y" >> $DEFCONFIG
           echo "-g3fa1853ed5d" > .scmversion
           git add -A
           git config user.email "builder@ci.local"
           git config user.name "CI Builder"
           git commit -m "patches" --allow-empty
-
-      - name: Fix sound include paths
-        shell: bash
-        run: |
-          cd android_kernel_samsung_msm8226
-          echo 'ccflags-y += -I$(src)' >> sound/soc/msm/Makefile
-          echo 'ccflags-y += -I$(src)/qdsp6v2' >> sound/soc/msm/Makefile
-          echo 'Fixed sound include paths'
 
       - name: Configure kernel
         shell: bash
@@ -82,139 +78,22 @@ jobs:
           cd android_kernel_samsung_msm8226
           make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" $DEFCONFIG
 
-      - name: Build kernel image and modules
+      - name: Build kernel modules
         shell: bash
         run: |
           cd android_kernel_samsung_msm8226
-          set -o pipefail
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" LOCALVERSION="-g3fa1853ed5d" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) vmlinux modules 2>&1 | tee build.log
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) modules 2>&1 | tee build.log
 
       - name: Show build errors if any
         if: always()
-        shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           echo "=== Errors from build.log ==="
           grep -i "error:" build.log | tail -30 || echo "No errors found"
           echo "=== Build artifacts ==="
-          ls -lh arch/arm/boot/zImage 2>/dev/null || echo "zImage NOT found"
-          ls -lh arch/arm/boot/dt.img 2>/dev/null || echo "dt.img NOT found"
           find . -name "wlan.ko" -exec ls -lh {} \; 2>/dev/null || echo "wlan.ko NOT found"
           echo "=== wlan.ko vermagic ==="
           find . -name "wlan.ko" -exec strings {} \; 2>/dev/null | grep -i vermagic | head -5
-
-      - name: Cross-compile monitor_enable for ARM
-        run: |
-          cat > monitor_enable.c << 'CEOF'
-#include <stdio.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <linux/wireless.h>
-#include <unistd.h>
-#include <stdlib.h>
-
-int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_args) {
-    int sock;
-    struct iwreq wrq;
-    struct iw_priv_args priv_args[64];
-    
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { perror("socket"); return -1; }
-    
-    memset(&wrq, 0, sizeof(wrq));
-    strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
-    wrq.u.data.pointer = priv_args;
-    wrq.u.data.length = 64;
-    
-    if (ioctl(sock, SIOCGIWPRIV, &wrq) < 0) {
-        perror("SIOCGIWPRIV");
-        close(sock);
-        return -1;
-    }
-    
-    int num = wrq.u.data.length;
-    int found_cmd = -1;
-    int i;
-    
-    for (i = 0; i < num; i++) {
-        if (strcmp(priv_args[i].name, name) == 0) {
-            found_cmd = priv_args[i].cmd;
-            printf("Found '%s': cmd=0x%x
-", name, found_cmd);
-            break;
-        }
-    }
-    
-    if (found_cmd < 0) {
-        fprintf(stderr, "ioctl '%s' not found
-", name);
-        close(sock);
-        return -1;
-    }
-    
-    memset(&wrq, 0, sizeof(wrq));
-    strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
-    wrq.u.data.pointer = args;
-    wrq.u.data.length = num_args;
-    wrq.u.data.flags = 1;
-    
-    if (ioctl(sock, found_cmd, &wrq) < 0) {
-        perror("ioctl");
-        close(sock);
-        return -1;
-    }
-    
-    printf("  OK '%s' sent
-", name);
-    close(sock);
-    return 0;
-}
-
-int main(int argc, char *argv[]) {
-    char *ifname;
-    
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <interface> [channel]
-", argv[0]);
-        return 1;
-    }
-    ifname = argv[1];
-    
-    int channel = 6;
-    if (argc >= 3) channel = atoi(argv[2]);
-    
-    printf("Enabling monitor mode on %s (channel %d)...
-", ifname, channel);
-    
-    /* Step 1: Set monitor state to START */
-    __s32 monitor_arg = 1;
-    if (send_priv_ioctl(ifname, "monitor", &monitor_arg, 1) < 0) {
-        fprintf(stderr, "Failed to set monitor state
-");
-        return 1;
-    }
-    
-    /* Step 2: Configure monitor mode */
-    __s32 config_args[5];
-    config_args[0] = channel;
-    config_args[1] = 20;
-    config_args[2] = 1;
-    config_args[3] = 0xFFFF0000;
-    config_args[4] = 1;
-    
-    if (send_priv_ioctl(ifname, "configureMonitorMode", config_args, 5) < 0) {
-        fprintf(stderr, "Warning: configureMonitorMode not found
-");
-    }
-    
-    printf("Monitor mode ENABLED on %s
-", ifname);
-    return 0;
-}
-CEOF
-          arm-linux-gnueabi-gcc -static -o monitor_enable monitor_enable.c
-          file monitor_enable
 
       - name: Package artifacts
         shell: bash
@@ -222,7 +101,7 @@ CEOF
           cd android_kernel_samsung_msm8226
           mkdir -p ../output
           find . -name "wlan.ko" -exec cp {} ../output/ \; 2>/dev/null || true
-          cp monitor_enable ../output/ 2>/dev/null || true
+          cp ../monitor_enable ../output/ 2>/dev/null || true
           cp build.log ../output/ 2>/dev/null || true
           cd ../output
           ls -lh
