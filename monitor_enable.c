@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     config_args[1] = 20;
     config_args[2] = 1;
     config_args[3] = 111; /* Capture all frame types */
-    config_args[4] = 1;
+    config_args[4] = 0;
     
     if (send_set_var_ints_getnone(ifname, 10, config_args, 5) < 0) {
         fprintf(stderr, "Failed to configure monitor mode\n");
