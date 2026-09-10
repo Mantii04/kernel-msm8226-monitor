@@ -6,60 +6,33 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_args) {
+int send_raw_ioctl(const char *ifname, int sub_cmd, __s32 *args, int num_args) {
     int sock;
     struct iwreq wrq;
-    struct iw_priv_args priv_args[256];
     
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return -1; }
     
     memset(&wrq, 0, sizeof(wrq));
     strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
-    wrq.u.data.pointer = priv_args;
-    wrq.u.data.length = 256;
     
-    if (ioctl(sock, SIOCGIWPRIV, &wrq) < 0) {
-        perror("SIOCGIWPRIV");
-        close(sock);
-        return -1;
-    }
-    
-    int num = wrq.u.data.length;
-    int found_cmd = -1;
-    int i;
-    
-    for (i = 0; i < num; i++) {
-        if (strcmp(priv_args[i].name, name) == 0) {
-            found_cmd = priv_args[i].cmd;
-            printf("Found '%s': cmd=0x%x\n", name, found_cmd);
-            break;
-        }
-    }
-    
-    if (found_cmd < 0) {
-        fprintf(stderr, "ioctl '%s' not found\n", name);
-        close(sock);
-        return -1;
-    }
-    
-    memset(&wrq, 0, sizeof(wrq));
-    strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
+    /* The driver's iw_setint_getnone expects the sub_cmd to be the first element */
+    /* But we can't pass 6 args easily if sub_cmd takes one. 
+       Actually, iw_setint_getnone reads sub_cmd from wrq.u.data.flags? No, it reads from args.
+       Let's pack sub_cmd into the flags, and args into the pointer.
+    */
+    wrq.u.data.flags = sub_cmd;
     wrq.u.data.pointer = args;
     wrq.u.data.length = num_args;
     
-    if (found_cmd < SIOCIWFIRSTPRIV) {
-        wrq.u.data.flags = found_cmd;
-        found_cmd = SIOCIWFIRSTPRIV;
-    }
-    
-    if (ioctl(sock, found_cmd, &wrq) < 0) {
-        perror("ioctl");
+    /* WLAN_PRIV_SET_INT_GET_NONE is SIOCIWFIRSTPRIV */
+    if (ioctl(sock, SIOCIWFIRSTPRIV, &wrq) < 0) {
+        perror("ioctl(SIOCIWFIRSTPRIV)");
         close(sock);
         return -1;
     }
     
-    printf("  OK '%s' sent\n", name);
+    printf("  OK sub_cmd %d sent\n", sub_cmd);
     close(sock);
     return 0;
 }
@@ -78,22 +51,24 @@ int main(int argc, char *argv[]) {
     
     printf("Enabling monitor mode on %s (channel %d)...\n", ifname, channel);
     
-    /* The 'monitor' ioctl takes 5 arguments:
-       0: Channel number
-       1: Bandwidth (20)
-       2: CRC check (1)
-       3: Type (111 = Mgmt+Ctrl+Data)
-       4: 802.11 to 802.3 conversion (1)
-    */
-    __s32 monitor_args[5];
-    monitor_args[0] = channel;
-    monitor_args[1] = 20;
-    monitor_args[2] = 1;
-    monitor_args[3] = 111; /* Capture all frame types */
-    monitor_args[4] = 1;
-    
-    if (send_priv_ioctl(ifname, "monitor", monitor_args, 5) < 0) {
+    /* WE_SET_MONITOR_STATE is 22. It takes 1 arg (1 to start) */
+    __s32 start_arg = 1;
+    if (send_raw_ioctl(ifname, 22, &start_arg, 1) < 0) {
         fprintf(stderr, "Failed to set monitor state\n");
+        return 1;
+    }
+    
+    /* WE_CONFIGURE_MONITOR_MODE is 10. It takes 5 args:
+       channel, bw, crc, type, conversion */
+    __s32 config_args[5];
+    config_args[0] = channel;
+    config_args[1] = 20;
+    config_args[2] = 1;
+    config_args[3] = 111; /* Capture all frame types */
+    config_args[4] = 1;
+    
+    if (send_raw_ioctl(ifname, 10, config_args, 5) < 0) {
+        fprintf(stderr, "Failed to configure monitor mode\n");
         return 1;
     }
     
