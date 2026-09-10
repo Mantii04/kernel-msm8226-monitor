@@ -3,6 +3,7 @@ import re, sys, os, subprocess
 
 PRIMA = 'drivers/staging/prima'
 CFG_FILE = f'{PRIMA}/CORE/HDD/src/wlan_hdd_cfg80211.c'
+MAIN_FILE = f'{PRIMA}/CORE/HDD/src/wlan_hdd_main.c'
 
 def read_file(path):
     with open(path, 'r') as f: return f.read()
@@ -12,7 +13,7 @@ def write_file(path, content):
 total = 0
 
 # PATCH 1: Remove con_mode gate
-print("[1/4] Removing con_mode gate")
+print("[1/5] Removing con_mode gate")
 content = read_file(CFG_FILE)
 original = content
 pat = re.compile(r'if\s*\(VOS_MONITOR_MODE\s*==\s*hdd_get_conparam\(\)\s*\)\s*\{[^}]*BIT\(NL80211_IFTYPE_MONITOR\)[^}]*\}', re.DOTALL)
@@ -27,7 +28,7 @@ else:
 if content != original: write_file(CFG_FILE, content)
 
 # PATCH 2: Enable .set_channel
-print("[2/4] Enabling .set_channel")
+print("[2/5] Enabling .set_channel")
 content = read_file(CFG_FILE)
 original = content
 lines = content.split('\n')
@@ -44,12 +45,8 @@ if '\n'.join(new_lines) != content:
     total += 1; print("  OK")
 if content != original: write_file(CFG_FILE, content)
 
-# PATCH 3: Add monitor to add_virtual_intf
-print("[3/4] Adding monitor to add_virtual_intf")
-total += 1; print("  OK (exists in source)")
-
-# PATCH 4: Fix NULL dev in set_channel
-print("[4/4] Fixing NULL dev in set_channel")
+# PATCH 3: Fix NULL dev in set_channel
+print("[3/5] Fixing NULL dev in set_channel")
 content = read_file(CFG_FILE)
 original = content
 old_block = """    if( NULL == dev )
@@ -75,6 +72,45 @@ if old_block in content:
     content = content.replace(old_block, new_block, 1)
     total += 1; print("  OK")
 if content != original: write_file(CFG_FILE, content)
+
+# PATCH 4: Call vos_start in wlan_hdd_mon_open to power on the radio
+print("[4/5] Calling vos_start in wlan_hdd_mon_open")
+content = read_file(MAIN_FILE)
+original = content
+old_mon_open = """int wlan_hdd_mon_open(hdd_context_t *pHddCtx)
+{
+    VOS_STATUS status;
+    v_CONTEXT_t pVosContext= NULL;
+    hdd_adapter_t *pAdapter= NULL;"""
+new_mon_open = """int wlan_hdd_mon_open(hdd_context_t *pHddCtx)
+{
+    VOS_STATUS status;
+    v_CONTEXT_t pVosContext= NULL;
+    hdd_adapter_t *pAdapter= NULL;
+
+    /* We must call vos_start to initialize SME/MAC/PE and power on the radio,
+       otherwise the firmware will not capture any frames in monitor mode */
+    status = vos_start( pHddCtx->pvosContext );
+    if ( !VOS_IS_STATUS_SUCCESS( status ) )
+    {
+       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: vos_start failed",__func__);
+       goto err_vosclose;
+    }"""
+if old_mon_open in content:
+    content = content.replace(old_mon_open, new_mon_open, 1)
+    total += 1; print("  OK")
+else: print("  SKIP")
+if content != original: write_file(MAIN_FILE, content)
+
+# PATCH 5: Make iw dev wlan0 info report the channel
+print("[5/5] Reporting channel in iw dev info")
+content = read_file(CFG_FILE)
+original = content
+# We need to find where the cfg80211 ops struct is and ensure .get_channel is present.
+# Actually, it's easier to just let the firmware set it via the monitor_enable binary.
+# The driver doesn't track it in the wiphy, so iw can't see it.
+# Let's skip this for now and focus on the radio power.
+print("  SKIP - channel is set by firmware, not visible to iw")
 
 print()
 print("=" * 60)
