@@ -12,6 +12,18 @@ def write_file(path, content):
 
 total = 0
 
+# PATCH 0: Add missing include
+print("[0/6] Adding wlan_hdd_request_manager.h include")
+content = read_file(CFG_FILE)
+original = content
+old_include = '#include "wlan_hdd_dev_pwr.h"'
+new_include = '#include "wlan_hdd_dev_pwr.h"\n#include "wlan_hdd_request_manager.h"'
+if old_include in content and new_include not in content:
+    content = content.replace(old_include, new_include, 1)
+    total += 1; print("  OK")
+else: print("  SKIP")
+if content != original: write_file(CFG_FILE, content)
+
 # PATCH 1: Remove con_mode gate
 print("[1/6] Removing con_mode gate")
 content = read_file(CFG_FILE)
