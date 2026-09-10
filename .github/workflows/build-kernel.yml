@@ -57,20 +57,17 @@ jobs:
           cp ../monitor_mode_patch.py .
           python3 monitor_mode_patch.py
 
-      - name: Fix vermagic to match stock kernel
+      - name: Fix vermagic to match stock kernel exactly
         shell: bash
         run: |
           cd android_kernel_samsung_msm8226
           DEFCONFIG=arch/arm/configs/lineage_s3ve3gxx_defconfig
           sed -i '/CONFIG_LOCALVERSION=/d' $DEFCONFIG
           sed -i '/CONFIG_LOCALVERSION_AUTO=/d' $DEFCONFIG
-          echo "CONFIG_LOCALVERSION=\"-g3fa1853ed5d\"" >> $DEFCONFIG
-          echo "# CONFIG_LOCALVERSION_AUTO is not set" >> $DEFCONFIG
+          echo 'CONFIG_LOCALVERSION="-g3fa1853ed5d"' >> $DEFCONFIG
+          echo '# CONFIG_LOCALVERSION_AUTO is not set' >> $DEFCONFIG
           echo "-g3fa1853ed5d" > .scmversion
-          git add -A
-          git config user.email "builder@ci.local"
-          git config user.name "CI Builder"
-          git commit -m "patches" --allow-empty
+          rm -rf .git
 
       - name: Configure kernel
         shell: bash
