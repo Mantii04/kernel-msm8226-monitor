@@ -78,10 +78,21 @@ int main(int argc, char *argv[]) {
     
     printf("Enabling monitor mode on %s (channel %d)...\n", ifname, channel);
     
-    /* The 'monitor' ioctl takes the channel number as the argument
-       and toggles the monitor state to START */
-    __s32 monitor_arg = channel;
-    if (send_priv_ioctl(ifname, "monitor", &monitor_arg, 1) < 0) {
+    /* The 'monitor' ioctl takes 5 arguments:
+       0: Channel number
+       1: Bandwidth (20)
+       2: CRC check (1)
+       3: Type (111 = Mgmt+Ctrl+Data)
+       4: 802.11 to 802.3 conversion (1)
+    */
+    __s32 monitor_args[5];
+    monitor_args[0] = channel;
+    monitor_args[1] = 20;
+    monitor_args[2] = 1;
+    monitor_args[3] = 111; /* Capture all frame types */
+    monitor_args[4] = 1;
+    
+    if (send_priv_ioctl(ifname, "monitor", monitor_args, 5) < 0) {
         fprintf(stderr, "Failed to set monitor state\n");
         return 1;
     }
