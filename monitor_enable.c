@@ -9,7 +9,7 @@
 int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_args) {
     int sock;
     struct iwreq wrq;
-    struct iw_priv_args priv_args[64];
+    struct iw_priv_args priv_args[256];
     
     sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) { perror("socket"); return -1; }
@@ -17,7 +17,7 @@ int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_a
     memset(&wrq, 0, sizeof(wrq));
     strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
     wrq.u.data.pointer = priv_args;
-    wrq.u.data.length = 64;
+    wrq.u.data.length = 256;
     
     if (ioctl(sock, SIOCGIWPRIV, &wrq) < 0) {
         perror("SIOCGIWPRIV");
