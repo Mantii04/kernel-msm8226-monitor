@@ -47,10 +47,15 @@ int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_a
     strncpy(wrq.ifr_name, ifname, IFNAMSIZ);
     wrq.u.data.pointer = args;
     wrq.u.data.length = num_args;
-    wrq.u.data.flags = 1;
     
-    /* cmd is a sub-command offset from SIOCIWFIRSTPRIV */
-    if (ioctl(sock, SIOCIWFIRSTPRIV + found_cmd, &wrq) < 0) {
+    /* If cmd is a sub-command (less than SIOCIWFIRSTPRIV), 
+       pass it in flags and use SIOCIWFIRSTPRIV as the ioctl */
+    if (found_cmd < SIOCIWFIRSTPRIV) {
+        wrq.u.data.flags = found_cmd;
+        found_cmd = SIOCIWFIRSTPRIV;
+    }
+    
+    if (ioctl(sock, found_cmd, &wrq) < 0) {
         perror("ioctl");
         close(sock);
         return -1;
