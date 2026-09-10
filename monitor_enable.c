@@ -48,8 +48,6 @@ int send_priv_ioctl(const char *ifname, const char *name, __s32 *args, int num_a
     wrq.u.data.pointer = args;
     wrq.u.data.length = num_args;
     
-    /* If cmd is a sub-command (less than SIOCIWFIRSTPRIV), 
-       pass it in flags and use SIOCIWFIRSTPRIV as the ioctl */
     if (found_cmd < SIOCIWFIRSTPRIV) {
         wrq.u.data.flags = found_cmd;
         found_cmd = SIOCIWFIRSTPRIV;
@@ -80,23 +78,14 @@ int main(int argc, char *argv[]) {
     
     printf("Enabling monitor mode on %s (channel %d)...\n", ifname, channel);
     
-    __s32 monitor_arg = 1;
+    /* The 'monitor' ioctl takes the channel number as the argument
+       and toggles the monitor state to START */
+    __s32 monitor_arg = channel;
     if (send_priv_ioctl(ifname, "monitor", &monitor_arg, 1) < 0) {
         fprintf(stderr, "Failed to set monitor state\n");
         return 1;
     }
     
-    __s32 config_args[5];
-    config_args[0] = channel;
-    config_args[1] = 20;
-    config_args[2] = 1;
-    config_args[3] = 0xFFFF0000;
-    config_args[4] = 1;
-    
-    if (send_priv_ioctl(ifname, "configureMonitorMode", config_args, 5) < 0) {
-        fprintf(stderr, "Warning: configureMonitorMode not found\n");
-    }
-    
-    printf("Monitor mode ENABLED on %s\n", ifname);
+    printf("Monitor mode ENABLED on %s (channel %d)\n", ifname, channel);
     return 0;
 }
