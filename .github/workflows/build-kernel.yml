@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           cd android_kernel_samsung_msm8226
-          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) modules 2>&1 | tee build.log
+          make ARCH=arm CROSS_COMPILE="${{ env.TOOLCHAIN }}" CONFIG_NO_ERROR_ON_MISMATCH=y -j$(nproc) vmlinux modules 2>&1 | tee build.log
 
       - name: Show build errors if any
         if: always()
